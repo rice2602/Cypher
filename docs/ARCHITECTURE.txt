@@ -1,0 +1,94 @@
+Cypher Architecture
+
+Components
+
+1. Agent
+
+Runs inside a private network.
+
+Responsibilities
+
+- Perform TCP connectivity checks.
+- Measure latency.
+- Collect diagnostics on failures.
+- Send heartbeat or incident to backend.
+
+------------------------
+
+2. Backend (FastAPI)
+
+Responsibilities
+
+- Receive telemetry.
+- Validate requests.
+- Store latest status.
+- Store incidents.
+- Trigger notifications.
+
+------------------------
+
+3. Redis
+
+Purpose
+
+Store live endpoint status.
+
+Fast reads for dashboard.
+
+No historical data.
+
+------------------------
+
+4. PostgreSQL
+
+Purpose
+
+Store incident history.
+
+Persistent storage.
+
+------------------------
+
+5. Dashboard
+
+Displays
+
+- Live status
+- Agent information
+- Incident history
+
+------------------------
+
+6. Telegram
+
+Receives incident notifications.
+
+------------------------
+
+Data Flow
+
+Agent
+
+↓
+
+TCP Probe
+
+↓
+
+Backend API
+
+↓
+
+Redis (live)
+
+↓
+
+Dashboard
+
+↓
+
+PostgreSQL (incidents)
+
+↓
+
+Telegram

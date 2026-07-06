@@ -1,0 +1,58 @@
+Cypher Development Tasks
+
+========================
+
+Backend
+
+[x] Create FastAPI project
+[x] Add configuration system
+[x] Create health endpoint
+[x] Connect Redis
+[x] Create heartbeat schema
+[x] Implement POST /heartbeat
+[x] Store latest heartbeat in Redis
+[x] Create incident schema
+[x] Implement POST /incident
+[x] Store incidents in PostgreSQL
+[x] Telegram notification service
+
+========================
+
+Agent
+
+[x] Create project structure
+[x] Add configuration
+[x] Implement TCP probe
+[x] Measure latency
+[x] Create heartbeat sender
+[x] Create diagnostics module
+[x] Collect ping result
+[x] Collect DNS lookup
+[x] Send incidents
+
+========================
+
+Dashboard
+
+[x] Basic HTML page
+[x] Status table
+[x] Agent list
+[x] Incident history page
+[x] Auto refresh
+
+========================
+
+Deployment
+
+[x] Dockerfile (backend)
+[x] Dockerfile (agent)
+[x] Docker Compose
+[x] Environment variables
+
+========================
+
+Testing
+
+[x] Local integration test
+[x] Failure simulation
+[x] Recovery test

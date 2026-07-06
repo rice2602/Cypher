@@ -1,0 +1,21 @@
+2026-07-06
+
+Decision 001
+
+Redis stores only the latest heartbeat.
+
+Reason
+
+Fast dashboard lookup.
+
+Historical data belongs in PostgreSQL.
+
+----------------------------------------
+
+Decision 002
+
+No authentication in MVP.
+
+Reason
+
+Reduce complexity.

@@ -1,0 +1,62 @@
+API Specification
+
+----------------------------------------
+
+GET /
+
+Purpose
+
+Health check.
+
+Response
+
+{
+    "status": "ok"
+}
+
+----------------------------------------
+
+POST /heartbeat
+
+Purpose
+
+Receive successful heartbeat from an agent.
+
+Request
+
+{
+    "agent_id": "...",
+    "target": "...",
+    "status": "UP",
+    "latency_ms": 25
+}
+
+Response
+
+HTTP 200
+
+----------------------------------------
+
+POST /incident
+
+Purpose
+
+Receive failed probe and diagnostics.
+
+Request
+
+{
+    "agent_id": "...",
+    "target": "...",
+    "status": "DOWN",
+    "latency_ms": null,
+    "diagnostics": {
+        "ping": "...",
+        "dns": "...",
+        "error": "..."
+    }
+}
+
+Response
+
+HTTP 200

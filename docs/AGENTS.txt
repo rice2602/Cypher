@@ -1,0 +1,50 @@
+Project Rules
+
+General
+
+- Python 3.12
+- FastAPI backend
+- Redis for live status
+- PostgreSQL for incident history
+- HTML + Tailwind + Vanilla JavaScript frontend
+- Docker Compose deployment
+
+Coding Style
+
+- Keep functions small.
+- Prefer readability.
+- Use type hints.
+- Keep files small.
+- Keep dependencies minimal.
+- Avoid premature optimization.
+- Avoid unnecessary abstractions.
+- Avoid duplicated code.
+- Use meaningful names.
+
+Development Rules
+
+Implement only the requested task.
+
+Do not implement future features.
+
+Do not refactor unrelated code.
+
+Do not rename files unless requested.
+
+Do not add libraries unless necessary.
+
+Keep changes minimal.
+
+Explain important design decisions briefly.
+
+Update TASKS.txt after completing a task.
+
+If requirements are unclear, choose the simplest solution.
+
+Project Philosophy
+
+Always build vertically.
+
+Every completed task should leave the project in a working state.
+
+Working software is more important than perfect architecture.

@@ -1,0 +1,23 @@
+# Cypher .dockerignore — keep build contexts lean
+
+# Python caches
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.venv
+
+# Dev/test files (not needed in images)
+verify_*.py
+*.md
+
+# Git
+.git
+.gitignore
+
+# Environment overrides (secrets must not bake into images)
+.env
+.env.*
+
+# Editor
+.vscode
+.idea

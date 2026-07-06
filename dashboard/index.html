@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cypher — Network Monitor</title>
+  <meta name="description" content="Cypher live network monitoring dashboard. Real-time agent status, latency, and incident history from inside your private network." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+      --bg:       #070d1a;
+      --surface:  #0d1629;
+      --border:   #1a2744;
+      --blue:     #3b82f6;
+      --blue-dim: #1d3d6f;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    code, .mono { font-family: 'JetBrains Mono', monospace; font-size: 0.82em; }
+
+    /* Glow pulse on the logo icon */
+    .logo-glow {
+      text-shadow: 0 0 20px #3b82f6aa, 0 0 40px #3b82f640;
+      animation: pulse-glow 3s ease-in-out infinite;
+    }
+    @keyframes pulse-glow {
+      0%, 100% { text-shadow: 0 0 20px #3b82f6aa, 0 0 40px #3b82f640; }
+      50%       { text-shadow: 0 0 30px #60a5facc, 0 0 60px #3b82f680; }
+    }
+
+    /* Status badge */
+    .badge-up   { background: #052e16; color: #4ade80; border: 1px solid #166534; }
+    .badge-down { background: #2d0a0a; color: #f87171; border: 1px solid #7f1d1d; }
+    .badge-dot-up   { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
+    .badge-dot-down { background: #f87171; box-shadow: 0 0 6px #f87171; animation: blink 1.2s step-start infinite; }
+    @keyframes blink { 50% { opacity: 0.2; } }
+
+    /* Table */
+    table { border-collapse: collapse; width: 100%; }
+    th, td { padding: 0.6rem 1rem; text-align: left; border-bottom: 1px solid var(--border); }
+    th { color: #64748b; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+    td { font-size: 0.88rem; }
+    tbody tr:hover { background: rgba(59,130,246,0.04); transition: background 0.15s; }
+    tbody tr:last-child td { border-bottom: none; }
+
+    /* Card */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Refresh ring */
+    .refresh-ring {
+      width: 18px; height: 18px;
+      border: 2px solid #1e3a5f;
+      border-top-color: var(--blue);
+      border-radius: 50%;
+    }
+    .refresh-ring.spinning { animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Empty state */
+    .empty { color: #334155; text-align: center; padding: 2.5rem 1rem; font-size: 0.9rem; }
+
+    /* Top bar gradient line */
+    .top-accent {
+      height: 3px;
+      background: linear-gradient(90deg, #1d3d6f, #3b82f6 50%, #1d3d6f);
+    }
+
+    /* Countdown bar */
+    #countdown-bar {
+      height: 2px;
+      background: var(--blue);
+      transition: width 1s linear;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="top-accent"></div>
+
+  <!-- Header -->
+  <header class="border-b border-[#1a2744]">
+    <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="logo-glow text-2xl">⚡</span>
+        <div>
+          <h1 class="text-lg font-bold text-white tracking-tight">Cypher</h1>
+          <p class="text-xs text-slate-500 -mt-0.5">Network Monitoring Platform</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-4">
+        <div id="refresh-ring" class="refresh-ring"></div>
+        <div class="text-right">
+          <p class="text-xs text-slate-500">Last updated</p>
+          <p id="last-updated" class="text-xs text-slate-300 mono">—</p>
+        </div>
+      </div>
+    </div>
+    <!-- Auto-refresh countdown bar -->
+    <div class="h-0.5 bg-[#1a2744]">
+      <div id="countdown-bar" style="width:100%"></div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-8 space-y-8">
+
+    <!-- Stats row -->
+    <div id="stats-row" class="grid grid-cols-3 gap-4 hidden">
+      <div class="card px-5 py-4">
+        <p class="text-xs text-slate-500 uppercase tracking-widest">Targets</p>
+        <p id="stat-total" class="text-3xl font-bold text-white mt-1">—</p>
+      </div>
+      <div class="card px-5 py-4">
+        <p class="text-xs text-slate-500 uppercase tracking-widest">Up</p>
+        <p id="stat-up" class="text-3xl font-bold text-green-400 mt-1">—</p>
+      </div>
+      <div class="card px-5 py-4">
+        <p class="text-xs text-slate-500 uppercase tracking-widest">Down</p>
+        <p id="stat-down" class="text-3xl font-bold text-red-400 mt-1">—</p>
+      </div>
+    </div>
+
+    <!-- Agent Status -->
+    <section class="card">
+      <div class="card-header">
+        <h2 class="text-sm font-semibold text-slate-200">Agent Status</h2>
+        <span id="status-count" class="text-xs text-slate-500"></span>
+      </div>
+      <div id="status-body">
+        <p class="empty">Loading…</p>
+      </div>
+    </section>
+
+    <!-- Incident History -->
+    <section class="card">
+      <div class="card-header">
+        <h2 class="text-sm font-semibold text-slate-200">Incident History</h2>
+        <span id="incident-count" class="text-xs text-slate-500"></span>
+      </div>
+      <div id="incidents-body">
+        <p class="empty">Loading…</p>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    const REFRESH_INTERVAL = 10; // seconds
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    function fmtTime(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
+             ' ' + d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+
+    function badge(status) {
+      const up = status === 'UP';
+      return `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${up ? 'badge-up' : 'badge-down'}">
+                <span class="w-1.5 h-1.5 rounded-full ${up ? 'badge-dot-up' : 'badge-dot-down'}"></span>
+                ${status}
+              </span>`;
+    }
+
+    function esc(s) {
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // ── Status table ─────────────────────────────────────────────────────────
+
+    function renderStatus(statuses) {
+      const el = document.getElementById('status-body');
+      document.getElementById('status-count').textContent =
+        statuses.length ? `${statuses.length} target${statuses.length !== 1 ? 's' : ''}` : '';
+
+      if (!statuses.length) {
+        el.innerHTML = '<p class="empty">No heartbeats received yet.</p>';
+        return;
+      }
+
+      // Sort: DOWN first, then alphabetical by agent_id:target
+      statuses.sort((a, b) => {
+        if (a.status !== b.status) return a.status === 'DOWN' ? -1 : 1;
+        return `${a.agent_id}:${a.target}`.localeCompare(`${b.agent_id}:${b.target}`);
+      });
+
+      // Stats
+      const up   = statuses.filter(s => s.status === 'UP').length;
+      const down = statuses.length - up;
+      document.getElementById('stats-row').classList.remove('hidden');
+      document.getElementById('stat-total').textContent = statuses.length;
+      document.getElementById('stat-up').textContent   = up;
+      document.getElementById('stat-down').textContent = down;
+
+      el.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Agent</th>
+              <th>Target</th>
+              <th>Status</th>
+              <th>Latency</th>
+              <th>Last Seen</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${statuses.map(s => `
+              <tr>
+                <td class="mono text-slate-300">${esc(s.agent_id)}</td>
+                <td class="mono text-blue-400">${esc(s.target)}</td>
+                <td>${badge(s.status)}</td>
+                <td class="mono text-slate-400">${s.latency_ms != null ? s.latency_ms + ' ms' : '—'}</td>
+                <td class="text-slate-500">${fmtTime(s.received_at)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    // ── Incident table ────────────────────────────────────────────────────────
+
+    function renderIncidents(incidents) {
+      const el = document.getElementById('incidents-body');
+      document.getElementById('incident-count').textContent =
+        incidents.length ? `${incidents.length} record${incidents.length !== 1 ? 's' : ''}` : '';
+
+      if (!incidents.length) {
+        el.innerHTML = '<p class="empty">No incidents recorded.</p>';
+        return;
+      }
+
+      el.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Agent</th>
+              <th>Target</th>
+              <th>Ping</th>
+              <th>DNS</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${incidents.map(i => `
+              <tr>
+                <td class="text-slate-500 whitespace-nowrap">${fmtTime(i.created_at)}</td>
+                <td class="mono text-slate-300">${esc(i.agent_id)}</td>
+                <td class="mono text-red-400">${esc(i.target)}</td>
+                <td class="mono text-slate-400 max-w-xs truncate" title="${esc(i.ping)}">${esc(i.ping ?? '—')}</td>
+                <td class="mono text-slate-400 max-w-xs truncate" title="${esc(i.dns)}">${esc(i.dns ?? '—')}</td>
+                <td class="mono text-yellow-500 max-w-xs truncate" title="${esc(i.error)}">${esc(i.error ?? '—')}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    // ── Fetch & refresh ───────────────────────────────────────────────────────
+
+    let secondsLeft = REFRESH_INTERVAL;
+    const ring = document.getElementById('refresh-ring');
+    const bar  = document.getElementById('countdown-bar');
+
+    async function refresh() {
+      ring.classList.add('spinning');
+      try {
+        const [sRes, iRes] = await Promise.all([
+          fetch('/status').then(r => r.json()),
+          fetch('/incidents').then(r => r.json()),
+        ]);
+        renderStatus(sRes.statuses ?? []);
+        renderIncidents(iRes.incidents ?? []);
+        document.getElementById('last-updated').textContent =
+          new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      } catch (err) {
+        console.error('Refresh failed:', err);
+      } finally {
+        ring.classList.remove('spinning');
+        secondsLeft = REFRESH_INTERVAL;
+        bar.style.width = '100%';
+      }
+    }
+
+    // Countdown bar tick
+    setInterval(() => {
+      secondsLeft = Math.max(0, secondsLeft - 1);
+      bar.style.width = (secondsLeft / REFRESH_INTERVAL * 100) + '%';
+    }, 1000);
+
+    // Auto-refresh
+    setInterval(refresh, REFRESH_INTERVAL * 1000);
+
+    // First load
+    refresh();
+  </script>
+</body>
+</html>

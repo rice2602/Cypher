@@ -1,0 +1,55 @@
+Project: Cypher
+
+Overview
+
+Cypher is an open-source push-based synthetic network monitoring platform.
+
+Unlike public uptime monitoring services, Cypher monitors connectivity from inside private networks using lightweight monitoring agents.
+
+The goal is to quickly detect network failures and reduce troubleshooting time by automatically collecting diagnostic information.
+
+Primary Workflow
+
+Agent
+    ↓
+TCP Probe
+    ↓
+Heartbeat or Incident
+    ↓
+Backend API
+    ↓
+Dashboard
+    ↓
+Notifications
+
+Target Users
+
+- System Administrators
+- DevOps Engineers
+- Platform Engineers
+- Small Infrastructure Teams
+
+MVP Features
+
+- Lightweight TCP connectivity checks
+- Distributed monitoring agents
+- Heartbeat reporting
+- Automatic diagnostics on failures
+- Live dashboard
+- Incident history
+- Telegram notifications
+
+Non Goals (MVP)
+
+- User authentication
+- RBAC
+- Kubernetes support
+- WebSockets
+- Multi-tenancy
+- Plugin system
+
+Design Principles
+
+- Keep everything simple.
+- Build working software first.
+- Add complexity only when required.
