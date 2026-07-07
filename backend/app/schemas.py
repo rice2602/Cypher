@@ -8,36 +8,6 @@ from datetime import datetime
 
 
 # ---------------------------------------------------------------------------
-# Auth
-# ---------------------------------------------------------------------------
-
-class RegisterRequest(BaseModel):
-    username: str = Field(..., min_length=3, max_length=64, pattern=r"^[a-zA-Z0-9_\-]+$")
-    password: str = Field(..., min_length=8, max_length=128)
-
-
-class LoginRequest(BaseModel):
-    username: str = Field(..., min_length=1)
-    password: str = Field(..., min_length=1)
-
-
-class TokenResponse(BaseModel):
-    token: str
-    type: str = "Bearer"
-    user_key: str
-
-
-class MeResponse(BaseModel):
-    id: int
-    username: str
-    user_key: str
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-# ---------------------------------------------------------------------------
 # Destinations
 # ---------------------------------------------------------------------------
 
@@ -66,7 +36,6 @@ class DestinationUpdate(BaseModel):
 
 class DestinationOut(BaseModel):
     id: int
-    user_key: str
     name: str
     url: str
     type: str
@@ -102,7 +71,6 @@ class AgentUpdate(BaseModel):
 
 class AgentOut(BaseModel):
     id: int
-    user_key: str
     name: str
     description: Optional[str] = None
     location: Optional[str] = None

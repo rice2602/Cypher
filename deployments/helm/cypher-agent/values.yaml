@@ -1,0 +1,34 @@
+# Default values for cypher-agent.
+replicaCount: 1
+
+image:
+  repository: cypher-agent
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "latest"
+
+# Agent configuration
+config:
+  agentId: "k8s-agent"
+  backendUrl: "http://cypher-backend:8000"
+  targets: "google.com:443,one.one.one.one:53"
+  probeInterval: 30
+  probeTimeout: 5
+
+# Optional agent enrollment key authentication
+auth:
+  enabled: false
+  agentKeyId: ""
+  agentKeySecret: ""
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

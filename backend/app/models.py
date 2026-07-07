@@ -1,7 +1,6 @@
 """
-models.py — Database models for Cypher v1.
+models.py — Database models for Cypher v1 (single-user mode).
 
-User model: username + hashed_password + user_key (tenant identifier).
 Destination: what to monitor.
 Agent: registered monitoring agent (requires >= 1 destination).
 Incident, UptimeMetric: existing monitoring data.
@@ -26,44 +25,13 @@ def _now() -> datetime:
 
 
 # ---------------------------------------------------------------------------
-# Users
-# ---------------------------------------------------------------------------
-
-class User(Base):
-    __tablename__ = "users"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-
-    # Login identity
-    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
-    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-
-    # Tenant key — used as the owner FK on all resources.
-    # Never exposed in URLs; returned once at registration and stored in JWT.
-    user_key: Mapped[str] = mapped_column(
-        String(64), unique=True, nullable=False, index=True,
-        default=lambda: secrets.token_hex(24)
-    )
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_now
-    )
-
-
-# ---------------------------------------------------------------------------
-# Destinations — what the user wants to monitor
+# Destinations — what to monitor
 # ---------------------------------------------------------------------------
 
 class Destination(Base):
     __tablename__ = "destinations"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-
-    # Owner
-    user_key: Mapped[str] = mapped_column(
-        String(64), ForeignKey("users.user_key", ondelete="CASCADE"),
-        nullable=False, index=True
-    )
 
     # Identity
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -91,12 +59,6 @@ class Agent(Base):
     __tablename__ = "agents"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-
-    # Owner
-    user_key: Mapped[str] = mapped_column(
-        String(64), ForeignKey("users.user_key", ondelete="CASCADE"),
-        nullable=False, index=True
-    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -128,12 +90,6 @@ class AgentKey(Base):
     # The agent_id string used in heartbeats/incidents
     agent_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
-    # Owner
-    user_key: Mapped[str | None] = mapped_column(
-        String(64), ForeignKey("users.user_key", ondelete="SET NULL"),
-        nullable=True, index=True
-    )
-
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -162,11 +118,7 @@ class Incident(Base):
     dns_verification_diagnostic: Mapped[str | None] = mapped_column(Text, nullable=True)
     root_cause_analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Owner (nullable for backward compat with old incidents)
-    user_key: Mapped[str | None] = mapped_column(
-        String(64), ForeignKey("users.user_key", ondelete="SET NULL"),
-        nullable=True, index=True
-    )
+    user_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
@@ -186,11 +138,7 @@ class UptimeMetric(Base):
     up_probes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_probes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
-    # Owner (nullable for backward compat)
-    user_key: Mapped[str | None] = mapped_column(
-        String(64), ForeignKey("users.user_key", ondelete="SET NULL"),
-        nullable=True, index=True
-    )
+    user_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
     __table_args__ = (
         UniqueConstraint("target", "day", "user_key", name="uq_target_day_user"),

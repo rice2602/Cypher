@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cypher-agent.fullname" . }}
+  labels:
+    {{- include "cypher-agent.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "cypher-agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cypher-agent.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "cypher-agent.fullname" . }}-config
+          {{- if .Values.auth.enabled }}
+          env:
+            - name: AGENT_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cypher-agent.fullname" . }}-auth
+                  key: AGENT_KEY_ID
+            - name: AGENT_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cypher-agent.fullname" . }}-auth
+                  key: AGENT_KEY_SECRET
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

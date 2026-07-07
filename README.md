@@ -12,7 +12,7 @@ Cypher is a **self-hosted network monitoring platform** that lets you:
 - **Monitor** any host, URL, subnet, or VMware node via lightweight agents
 - **Get alerted** when targets go down (Telegram, Slack, Teams, PagerDuty, webhooks)
 - **Visualise** live status, incidents, and 7-day uptime from a sleek dashboard
-- **Run it anywhere** — Docker Compose locally, or free on Render.com in the cloud
+- **Deploy locally** — Single-user mode optimized for local deployment and team monitoring
 
 ---
 
@@ -24,7 +24,7 @@ Cypher is a **self-hosted network monitoring platform** that lets you:
 git clone https://github.com/your-org/cypher.git
 cd cypher
 cp .env.example .env
-# Edit .env — set a strong JWT_SECRET at minimum
+# Edit .env — configure notification channels if desired
 ```
 
 **2. Start all services**
@@ -39,52 +39,34 @@ docker compose up --build
 http://localhost:8000/dashboard
 ```
 
-**4. Register an account** — then create a Destination, then register an Agent.
+**4. Create a Destination** — then register an Agent to start monitoring.
 
 ---
 
-## Deploy to Render (Free)
+## Deployment Options
 
-Render offers a **free web service** tier (750 hrs/month) — enough to run Cypher 24/7.
+Cypher is optimized for **local deployment**:
+- Docker Compose (recommended for local use)
+- Kubernetes (via Helm charts in `deployments/helm/`)
+- Serverless (AWS Lambda, Azure Functions, Google Cloud Run)
 
-### One-click deploy
-
-1. Fork this repo to your GitHub account
-2. Go to [dashboard.render.com](https://dashboard.render.com) → **New** → **Blueprint**
-3. Connect your forked repo — Render will detect `render.yaml` automatically
-4. Add your **Redis URL** from [Upstash](https://upstash.com) (free, 10k commands/day):
-   - Create a Redis database on Upstash → copy the Redis URL
-   - In Render → Environment → set `REDIS_URL`
-5. Click **Apply** — your app deploys in ~2 minutes
-
-### Free stack used
-
-| Component | Provider | Free tier |
-|---|---|---|
-| Web service (backend + dashboard) | Render | 750 hrs/mo |
-| PostgreSQL | Render | 90-day trial → migrate to [Neon](https://neon.tech) (free forever, 0.5 GB) |
-| Redis | [Upstash](https://upstash.com) | 10,000 commands/day |
-
-> **Tip:** To avoid the 90-day Render Postgres limit, use Neon's free serverless Postgres.  
-> Create a database at [neon.tech](https://neon.tech) and set `DATABASE_URL` in Render's environment.
+For team access, deploy behind your corporate network or use a reverse proxy with basic auth.
 
 ---
 
 ## User Onboarding Flow
 
 ```
-1. Visit your Cypher URL
-2. Register with username + password
-   → A unique user_key is generated and displayed ONCE — store it safely
-3. Create a Destination (host/URL/subnet/VMware)
-4. Register an Agent (requires at least 1 destination)
+1. Visit your Cypher dashboard (http://localhost:8000/dashboard)
+2. Create a Destination (host/URL/subnet/VMware)
+3. Register an Agent (requires at least 1 destination)
    → You receive a key_id + key_secret — store them safely
-5. Deploy the agent with the credentials:
+4. Deploy the agent with the credentials:
    AGENT_KEY_ID=<key_id>
    AGENT_KEY_SECRET=<key_secret>
-   BACKEND_URL=https://your-cypher.onrender.com
+   BACKEND_URL=http://localhost:8000
    TARGETS=your-host.example.com:443
-6. Watch the dashboard light up 📡
+5. Watch the dashboard light up 📡
 ```
 
 ---
@@ -96,7 +78,7 @@ Render offers a **free web service** tier (750 hrs/month) — enough to run Cyph
 │   Agent(s)  │ ──────────────▶ │   FastAPI     │──▶│  PostgreSQL  │
 │  (Docker or │                  │   Backend     │   │  (incidents, │
 │  serverless)│ ◀────────────── │  + Dashboard  │   │  uptime,     │
-└─────────────┘  targets config  └──────┬───────┘   │  users, etc) │
+└─────────────┘  targets config  └──────┬───────┘   │  agents, etc)│
                                         │            └──────────────┘
                                         ▼
                                   ┌──────────┐
@@ -129,12 +111,14 @@ Render offers a **free web service** tier (750 hrs/month) — enough to run Cyph
 |---|---|---|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `REDIS_URL` | Yes | Redis connection string |
-| `JWT_SECRET` | Yes | Secret for signing JWTs — use a random 32+ char string |
 | `RATE_LIMIT_PER_MINUTE` | No | Max agent requests/min (default: 120) |
 | `CORS_ORIGINS` | No | Allowed CORS origins (default: `*`) |
 | `TELEGRAM_BOT_TOKEN` | No | Telegram bot token for alerts |
 | `TELEGRAM_CHAT_ID` | No | Telegram chat ID for alerts |
 | `SLACK_WEBHOOK_URL` | No | Slack incoming webhook URL |
+| `TEAMS_WEBHOOK_URL` | No | Teams incoming webhook URL |
+| `PAGERDUTY_ROUTING_KEY` | No | PagerDuty routing key |
+| `GENERIC_WEBHOOK_URL` | No | Generic webhook URL |
 
 ---
 
@@ -142,12 +126,11 @@ Render offers a **free web service** tier (750 hrs/month) — enough to run Cyph
 
 ```
 cypher/
-├── backend/           FastAPI backend (auth, CRUD, monitoring endpoints)
+├── backend/           FastAPI backend (CRUD, monitoring endpoints)
 │   ├── app/
 │   │   ├── main.py       All routes
 │   │   ├── models.py     SQLAlchemy models
 │   │   ├── schemas.py    Pydantic schemas
-│   │   ├── auth.py       Password hashing + JWT
 │   │   ├── config.py     Settings from env vars
 │   │   ├── database.py   Async SQLAlchemy engine
 │   │   ├── notifications.py  Alert dispatching
@@ -161,9 +144,9 @@ cypher/
 │   ├── diagnostics.py Detailed failure analysis
 │   └── config.py
 ├── dashboard/         Single-page app
-│   └── index.html     Dark SPA (login, dashboard, CRUD)
-├── docker-compose.yml Local dev
-├── render.yaml        Render.com deployment blueprint
+│   └── index.html     Dark SPA (dashboard, CRUD)
+├── docker-compose.yml Local deployment
+├── deployments/       Helm charts for Kubernetes
 └── .env.example       Environment variable template
 ```
 

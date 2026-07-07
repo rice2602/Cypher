@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cypher-agent.fullname" . }}-config
+  labels:
+    {{- include "cypher-agent.labels" . | nindent 4 }}
+data:
+  AGENT_ID: {{ .Values.config.agentId | quote }}
+  BACKEND_URL: {{ .Values.config.backendUrl | quote }}
+  TARGETS: {{ .Values.config.targets | quote }}
+  PROBE_INTERVAL: {{ .Values.config.probeInterval | quote }}
+  PROBE_TIMEOUT: {{ .Values.config.probeTimeout | quote }}
