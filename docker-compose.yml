@@ -38,10 +38,24 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL:        ${DATABASE_URL:-postgresql://cypher:cypher@postgres:5432/cypher}
+      DATABASE_URL:        ${DATABASE_URL:-postgresql+asyncpg://cypher:cypher@postgres:5432/cypher}
       REDIS_URL:           ${REDIS_URL:-redis://redis:6379/0}
+      JWT_SECRET:          ${JWT_SECRET:-cypher-change-me-in-production}
+      SINGLE_USER_MODE:    ${SINGLE_USER_MODE:-true}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
+      CORS_ORIGINS:        ${CORS_ORIGINS:-*}
       TELEGRAM_BOT_TOKEN:  ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID:    ${TELEGRAM_CHAT_ID:-}
+      SLACK_WEBHOOK_URL:   ${SLACK_WEBHOOK_URL:-}
+      TEAMS_WEBHOOK_URL:   ${TEAMS_WEBHOOK_URL:-}
+      PAGERDUTY_ROUTING_KEY: ${PAGERDUTY_ROUTING_KEY:-}
+      GENERIC_WEBHOOK_URL: ${GENERIC_WEBHOOK_URL:-}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,6 +75,8 @@ services:
       BACKEND_URL:    ${BACKEND_URL:-http://backend:8000}
       PROBE_INTERVAL: ${PROBE_INTERVAL:-30}
       PROBE_TIMEOUT:  ${PROBE_TIMEOUT:-5}
+      AGENT_KEY_ID:   ${AGENT_KEY_ID:-}
+      AGENT_KEY_SECRET: ${AGENT_KEY_SECRET:-}
     depends_on:
       - backend
 

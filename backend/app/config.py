@@ -14,6 +14,10 @@ class Settings:
     # JWT signing secret — set a strong random value in production
     JWT_SECRET: str = os.getenv("JWT_SECRET", "cypher-change-this-in-production")
 
+    # Single-user mode — when True all auth checks are bypassed.
+    # Default: True (local-first; no login required).
+    SINGLE_USER_MODE: bool = os.getenv("SINGLE_USER_MODE", "true").lower() == "true"
+
     # Notifications (all optional)
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")

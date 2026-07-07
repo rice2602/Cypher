@@ -1,7 +1,10 @@
 """
 main.py — Cypher v1 FastAPI application.
 
-Auth:    POST /auth/register, POST /auth/login, GET /auth/me
+Single-user mode (default): No auth required. All API endpoints are open.
+Set SINGLE_USER_MODE=false to require JWT for all /api/v1/* routes.
+
+Auth:         POST /auth/register, POST /auth/login  (future; currently no-op when SUM=true)
 Destinations: GET/POST/PUT/DELETE /api/v1/destinations
 Agents:       GET/POST/PUT/DELETE /api/v1/agents
 Monitoring:   POST /heartbeat, POST /incident (agent-facing, HMAC-signed)
@@ -27,14 +30,12 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select, desc, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import create_jwt, verify_jwt, hash_password, verify_password
 from app.config import settings
 from app.database import engine, get_db
-from app.models import Base, User, Destination, Agent, AgentKey, Incident, UptimeMetric
+from app.models import Base, Destination, Agent, AgentKey, Incident, UptimeMetric
 from app.notifications import dispatch_alerts
 from app.redis_client import redis_client
 from app.schemas import (
-    RegisterRequest, LoginRequest, TokenResponse, MeResponse,
     DestinationCreate, DestinationUpdate, DestinationOut,
     AgentCreate, AgentUpdate, AgentOut, AgentCreateResponse,
     AgentKeyOut, Heartbeat, IncidentCreate,
@@ -79,32 +80,6 @@ app.add_middleware(
 )
 
 
-# ---------------------------------------------------------------------------
-# Auth helpers / dependencies
-# ---------------------------------------------------------------------------
-
-async def get_current_user(
-    authorization: str = Header(None),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    """Dependency: validate Bearer JWT and return the User."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid Authorization header",
-        )
-    token = authorization.split(" ", 1)[1]
-    payload = verify_jwt(token)
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        )
-    result = await db.execute(select(User).where(User.id == payload.get("user_id")))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-    return user
 
 
 # ---------------------------------------------------------------------------
@@ -197,48 +172,10 @@ async def dashboard():
     return _DASHBOARD.read_text(encoding="utf-8")
 
 
-# ---------------------------------------------------------------------------
-# Authentication endpoints
-# ---------------------------------------------------------------------------
-
-@app.post("/auth/register", response_model=TokenResponse, status_code=201)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    """Register a new user. Returns a JWT and the user_key (store it!)."""
-    # Check username not taken
-    result = await db.execute(select(User).where(User.username == body.username))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Username already taken")
-
-    user = User(
-        username=body.username,
-        hashed_password=hash_password(body.password),
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-
-    token = create_jwt({"user_id": user.id, "user_key": user.user_key})
-    return TokenResponse(token=token, user_key=user.user_key)
-
-
-@app.post("/auth/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    """Login with username + password. Returns JWT and user_key."""
-    result = await db.execute(select(User).where(User.username == body.username))
-    user = result.scalar_one_or_none()
-
-    if not user or not verify_password(body.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-
-    token = create_jwt({"user_id": user.id, "user_key": user.user_key})
-    return TokenResponse(token=token, user_key=user.user_key)
-
-
-@app.get("/auth/me", response_model=MeResponse)
-async def auth_me(current_user: User = Depends(get_current_user)):
-    """Return info about the logged-in user."""
-    return current_user
-
+@app.get("/api/v1/mode")
+async def get_mode():
+    """Return server mode. Dashboard checks this on boot to skip login."""
+    return {"single_user_mode": settings.SINGLE_USER_MODE}
 
 # ---------------------------------------------------------------------------
 # Destinations
@@ -246,12 +183,10 @@ async def auth_me(current_user: User = Depends(get_current_user)):
 
 @app.get("/api/v1/destinations", response_model=list[DestinationOut])
 async def list_destinations(
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
         select(Destination)
-        .where(Destination.user_key == current_user.user_key)
         .order_by(desc(Destination.created_at))
     )
     return result.scalars().all()
@@ -260,10 +195,9 @@ async def list_destinations(
 @app.post("/api/v1/destinations", response_model=DestinationOut, status_code=201)
 async def create_destination(
     body: DestinationCreate,
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    dest = Destination(**body.model_dump(), user_key=current_user.user_key)
+    dest = Destination(**body.model_dump())
     db.add(dest)
     await db.commit()
     await db.refresh(dest)
@@ -274,14 +208,10 @@ async def create_destination(
 async def update_destination(
     dest_id: int,
     body: DestinationUpdate,
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Destination).where(
-            Destination.id == dest_id,
-            Destination.user_key == current_user.user_key,
-        )
+        select(Destination).where(Destination.id == dest_id)
     )
     dest = result.scalar_one_or_none()
     if not dest:
@@ -298,14 +228,10 @@ async def update_destination(
 @app.delete("/api/v1/destinations/{dest_id}", status_code=204)
 async def delete_destination(
     dest_id: int,
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Destination).where(
-            Destination.id == dest_id,
-            Destination.user_key == current_user.user_key,
-        )
+        select(Destination).where(Destination.id == dest_id)
     )
     dest = result.scalar_one_or_none()
     if not dest:
@@ -318,12 +244,10 @@ async def delete_destination(
 # Agents  (require >= 1 destination before registering)
 # ---------------------------------------------------------------------------
 
-async def _require_destination(user_key: str, db: AsyncSession):
-    """Guard: raise 403 if user has no destinations yet."""
+async def _require_destination(db: AsyncSession):
+    """Guard: raise 403 if no destinations exist yet."""
     result = await db.execute(
-        select(func.count())
-        .select_from(Destination)
-        .where(Destination.user_key == user_key)
+        select(func.count()).select_from(Destination)
     )
     if result.scalar() == 0:
         raise HTTPException(
@@ -345,7 +269,7 @@ def _parse_dest_ids(raw: str) -> list[int]:
 def _make_agent_out(agent: Agent) -> AgentOut:
     data = {
         "id": agent.id,
-        "user_key": agent.user_key,
+        "user_key": None,
         "name": agent.name,
         "description": agent.description,
         "location": agent.location,
@@ -359,12 +283,10 @@ def _make_agent_out(agent: Agent) -> AgentOut:
 
 @app.get("/api/v1/agents", response_model=list[AgentOut])
 async def list_agents(
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
         select(Agent)
-        .where(Agent.user_key == current_user.user_key)
         .order_by(desc(Agent.created_at))
     )
     return [_make_agent_out(a) for a in result.scalars().all()]
@@ -373,30 +295,26 @@ async def list_agents(
 @app.post("/api/v1/agents", response_model=AgentCreateResponse, status_code=201)
 async def create_agent(
     body: AgentCreate,
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     # Guard: must have at least one destination
-    await _require_destination(current_user.user_key, db)
+    await _require_destination(db)
 
-    # Validate that all provided destination IDs belong to this user
+    # Validate that all provided destination IDs exist
     if body.destination_ids:
         result = await db.execute(
             select(func.count())
             .select_from(Destination)
-            .where(
-                Destination.id.in_(body.destination_ids),
-                Destination.user_key == current_user.user_key,
-            )
+            .where(Destination.id.in_(body.destination_ids))
         )
         if result.scalar() != len(body.destination_ids):
             raise HTTPException(
                 status_code=400,
-                detail="One or more destination IDs are invalid or do not belong to you.",
+                detail="One or more destination IDs are invalid.",
             )
 
     # Generate HMAC key for this agent
-    agent_id_str = f"{current_user.user_key[:8]}-{body.name.lower().replace(' ', '-')}"
+    agent_id_str = f"agent-{body.name.lower().replace(' ', '-')}"
     key_id = f"ak_{secrets.token_hex(16)}"
     key_secret = secrets.token_hex(32)
     key_hash = hashlib.sha256(key_secret.encode()).hexdigest()
@@ -405,14 +323,12 @@ async def create_agent(
         key_id=key_id,
         key_hash=key_hash,
         agent_id=agent_id_str,
-        user_key=current_user.user_key,
         is_active=True,
     )
     db.add(agent_key)
     await db.flush()
 
     agent = Agent(
-        user_key=current_user.user_key,
         name=body.name,
         description=body.description,
         location=body.location,
@@ -435,14 +351,10 @@ async def create_agent(
 async def update_agent(
     agent_id: int,
     body: AgentUpdate,
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Agent).where(
-            Agent.id == agent_id,
-            Agent.user_key == current_user.user_key,
-        )
+        select(Agent).where(Agent.id == agent_id)
     )
     agent = result.scalar_one_or_none()
     if not agent:
@@ -462,14 +374,10 @@ async def update_agent(
 @app.delete("/api/v1/agents/{agent_id}", status_code=204)
 async def delete_agent(
     agent_id: int,
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Agent).where(
-            Agent.id == agent_id,
-            Agent.user_key == current_user.user_key,
-        )
+        select(Agent).where(Agent.id == agent_id)
     )
     agent = result.scalar_one_or_none()
     if not agent:
@@ -482,13 +390,13 @@ async def delete_agent(
 # Monitoring — heartbeats and incidents (agent-facing)
 # ---------------------------------------------------------------------------
 
-async def record_uptime_probe(db: AsyncSession, target: str, is_up: bool, user_key: str | None = None):
+async def record_uptime_probe(db: AsyncSession, target: str, is_up: bool):
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     result = await db.execute(
         select(UptimeMetric).where(
             UptimeMetric.target == target,
             UptimeMetric.day == today,
-            UptimeMetric.user_key == user_key,
+            UptimeMetric.user_key == None,
         )
     )
     metric = result.scalar_one_or_none()
@@ -502,7 +410,7 @@ async def record_uptime_probe(db: AsyncSession, target: str, is_up: bool, user_k
             day=today,
             up_probes=1 if is_up else 0,
             total_probes=1,
-            user_key=user_key,
+            user_key=None,
         )
         db.add(metric)
     await db.commit()
@@ -533,12 +441,8 @@ async def perform_rca(target: str, failed_agent_id: str) -> str:
 
 
 async def _resolve_user_key_from_agent(agent_id: str, db: AsyncSession) -> str | None:
-    """Look up the user_key from the AgentKey associated with this agent_id."""
-    result = await db.execute(
-        select(AgentKey.user_key).where(AgentKey.agent_id == agent_id, AgentKey.is_active == True)
-    )
-    row = result.first()
-    return row[0] if row else None
+    """No-op for single-user mode - always returns None."""
+    return None
 
 
 @app.post("/heartbeat")
@@ -556,8 +460,7 @@ async def receive_heartbeat(
         f"heartbeat:{heartbeat.agent_id}:{heartbeat.target}",
         json.dumps(data),
     )
-    user_key = await _resolve_user_key_from_agent(heartbeat.agent_id, db)
-    await record_uptime_probe(db, heartbeat.target, is_up=True, user_key=user_key)
+    await record_uptime_probe(db, heartbeat.target, is_up=True)
     return {"status": "ok"}
 
 
@@ -577,7 +480,6 @@ async def receive_incident(
     await redis_client.set(redis_key, json.dumps(redis_data))
 
     rca_summary = await perform_rca(incident.target, incident.agent_id)
-    user_key = await _resolve_user_key_from_agent(incident.agent_id, db)
 
     db_incident = Incident(
         agent_id=incident.agent_id,
@@ -591,12 +493,12 @@ async def receive_incident(
         http_diagnostic=incident.diagnostics.http,
         dns_verification_diagnostic=incident.diagnostics.dns_verification,
         root_cause_analysis=rca_summary,
-        user_key=user_key,
+        user_key=None,
     )
     db.add(db_incident)
     await db.commit()
 
-    await record_uptime_probe(db, incident.target, is_up=False, user_key=user_key)
+    await record_uptime_probe(db, incident.target, is_up=False)
 
     background_tasks.add_task(
         dispatch_alerts,
@@ -615,36 +517,27 @@ async def receive_incident(
 
 @app.get("/api/v1/status")
 async def get_status(
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Live status for this user's agents (filtered by user_key)."""
-    result = await db.execute(
-        select(AgentKey.agent_id).where(AgentKey.user_key == current_user.user_key)
-    )
-    user_agent_ids = {row[0] for row in result.all()}
-
+    """Live status for all agents."""
     keys = await redis_client.keys("heartbeat:*")
     statuses = []
     for key in keys:
         raw = await redis_client.get(key)
         if raw:
             data = json.loads(raw)
-            if not user_agent_ids or data.get("agent_id") in user_agent_ids:
-                statuses.append(data)
+            statuses.append(data)
     return {"statuses": statuses}
 
 
 @app.get("/api/v1/incidents")
 async def get_incidents(
     limit: int = 50,
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Recent incidents belonging to this user."""
+    """Recent incidents."""
     result = await db.execute(
         select(Incident)
-        .where(Incident.user_key == current_user.user_key)
         .order_by(desc(Incident.created_at))
         .limit(limit)
     )
@@ -672,10 +565,9 @@ async def get_incidents(
 
 @app.get("/api/v1/metrics/uptime")
 async def get_uptime_metrics(
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """7-day uptime statistics for this user's targets."""
+    """7-day uptime statistics for all targets."""
     seven_days_ago = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
     ) - timedelta(days=7)
@@ -688,7 +580,7 @@ async def get_uptime_metrics(
         )
         .where(
             UptimeMetric.day >= seven_days_ago,
-            UptimeMetric.user_key == current_user.user_key,
+            UptimeMetric.user_key == None,
         )
         .group_by(UptimeMetric.target)
     )
