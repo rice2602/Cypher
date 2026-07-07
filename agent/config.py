@@ -25,5 +25,9 @@ class AgentConfig:
     # TCP connection timeout per probe, in seconds.
     PROBE_TIMEOUT: int = int(os.getenv("PROBE_TIMEOUT", "5"))
 
+    # Agent enrollment key credentials (optional — if blank, requests are unsigned).
+    AGENT_KEY_ID: str = os.getenv("AGENT_KEY_ID", "")
+    AGENT_KEY_SECRET: str = os.getenv("AGENT_KEY_SECRET", "")
+
 
 config = AgentConfig()

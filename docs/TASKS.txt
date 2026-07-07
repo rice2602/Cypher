@@ -56,3 +56,33 @@ Testing
 [x] Local integration test
 [x] Failure simulation
 [x] Recovery test
+
+========================
+
+SaaS Production Transition Plan
+
+Phase 1: Multi-Tenancy & Identity
+[x] Set up multi-tenant database schemas (Organizations & Teams)
+[x] Implement Authentication system (OAuth2/SSO with GitHub/Azure AD)
+[x] Implement Role-Based Access Control (Viewer, Operator, Admin)
+
+Phase 2: Agent Security & Management
+[x] Implement Agent enrollment key creation & rotation API
+[x] Secure agent requests using HMAC/JWT authentication
+[x] Implement API rate limiting and DDoS protection (Redis token bucket)
+
+Phase 3: Diagnostic Commands & Probes Expansion
+[x] Add Traceroute diagnostic collection for agent DOWN events
+[x] Add Curl/HTTP payload diagnostic collection for HTTP targets
+[x] Add DNS query verification diagnostics
+
+Phase 4: Incident Correlation & Smart Alerts
+[x] Implement Basic Root Cause Analysis (multi-agent ping comparison)
+[x] Add multi-channel alerting (Slack, Teams, PagerDuty, Webhooks)
+[x] Add uptime history metrics, availability percentage, and SLA reports
+
+Phase 5: Cloud Native Deployments & Orchestration
+[x] Package agent as Helm Chart for Kubernetes deployment
+[x] Package agent for serverless environments (AWS Lambda, Azure Functions, Cloud Run)
+[x] Set up HA production compose / helm deploy scripts with SSL termination
+

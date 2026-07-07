@@ -55,7 +55,7 @@ def _probe_target(target: str) -> None:
         send_heartbeat(config.AGENT_ID, target, latency_ms)
     else:
         print(f"[probe] {target}  DOWN", flush=True)
-        diag = collect(host, error="TCP connection failed")
+        diag = collect(host, port, error="TCP connection failed")
         send_incident(config.AGENT_ID, target, diag)
 
 
