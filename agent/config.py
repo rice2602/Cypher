@@ -6,6 +6,7 @@ so the agent can run with zero configuration during development.
 """
 
 import os
+import sys
 
 
 class AgentConfig:
@@ -20,10 +21,10 @@ class AgentConfig:
     BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
 
     # How often to run probes, in seconds.
-    PROBE_INTERVAL: int = int(os.getenv("PROBE_INTERVAL", "30"))
+    PROBE_INTERVAL: int = max(1, int(os.getenv("PROBE_INTERVAL", "30")))
 
     # TCP connection timeout per probe, in seconds.
-    PROBE_TIMEOUT: int = int(os.getenv("PROBE_TIMEOUT", "5"))
+    PROBE_TIMEOUT: int = max(1, int(os.getenv("PROBE_TIMEOUT", "5")))
 
     # Agent enrollment key credentials (optional — if blank, requests are unsigned).
     AGENT_KEY_ID: str = os.getenv("AGENT_KEY_ID", "")

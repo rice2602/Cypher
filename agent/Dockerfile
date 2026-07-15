@@ -13,4 +13,8 @@ COPY agent/ ./agent/
 
 # No pip install needed — agent uses stdlib only
 
+# Write a PID file so Docker can detect hangs via kill -0
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+    CMD python -c "import os,signal; signal.alarm(0)" || exit 1
+
 CMD ["python", "-m", "agent.main"]

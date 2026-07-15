@@ -14,6 +14,7 @@ Dashboard:    GET  /api/v1/status, /api/v1/incidents, /api/v1/metrics/uptime
 import hashlib
 import hmac
 import json
+import logging
 import os
 import pathlib
 import secrets
@@ -28,7 +29,10 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select, desc, func, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger("cypher")
 
 from app.config import settings
 from app.database import engine, get_db
@@ -53,7 +57,7 @@ _DASHBOARD = pathlib.Path(__file__).parent.parent.parent / "dashboard" / "index.
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Idempotent migrations for legacy columns
+        # Idempotent migrations for legacy columns and indexes
         for stmt in [
             "ALTER TABLE incidents ADD COLUMN IF NOT EXISTS traceroute_diagnostic TEXT;",
             "ALTER TABLE incidents ADD COLUMN IF NOT EXISTS http_diagnostic TEXT;",
@@ -61,10 +65,17 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE incidents ADD COLUMN IF NOT EXISTS root_cause_analysis TEXT;",
             "ALTER TABLE incidents ADD COLUMN IF NOT EXISTS user_key TEXT;",
             "ALTER TABLE uptime_metrics ADD COLUMN IF NOT EXISTS user_key TEXT;",
+            # Indexes for common query patterns
+            "CREATE INDEX IF NOT EXISTS idx_incidents_target_created ON incidents(target, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_incidents_agent_id ON incidents(agent_id);",
+            "CREATE INDEX IF NOT EXISTS idx_uptime_metrics_target_day ON uptime_metrics(target, day DESC);",
         ]:
             await conn.execute(text(stmt))
     yield
-    await redis_client.aclose()
+    try:
+        await redis_client.aclose()
+    except Exception:
+        pass
 
 
 app = FastAPI(title="Cypher API", version="1.0.0", lifespan=lifespan)
@@ -92,9 +103,12 @@ async def check_rate_limit(request: Request):
     )
     bucket = int(time.time()) // 60
     rkey = f"ratelimit:{key_id}:{bucket}"
-    current = await redis_client.incr(rkey)
-    if current == 1:
-        await redis_client.expire(rkey, 120)
+    # Pipeline incr+expire to reduce roundtrips and race window
+    pipe = redis_client.pipeline()
+    pipe.incr(rkey)
+    pipe.expire(rkey, 120)
+    results = await pipe.execute()
+    current = results[0]
     if current > settings.RATE_LIMIT_PER_MINUTE:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -121,12 +135,28 @@ async def verify_agent_signature(
 
     key_id = request.headers.get("X-Cypher-Key-Id")
     signature = request.headers.get("X-Cypher-Signature")
+    timestamp = request.headers.get("X-Cypher-Timestamp")
 
     if not key_id or not signature:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing agent auth headers (X-Cypher-Key-Id, X-Cypher-Signature)",
         )
+
+    # Validate timestamp to prevent replay attacks (5 min tolerance)
+    if timestamp:
+        try:
+            ts = int(timestamp)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid X-Cypher-Timestamp header",
+            )
+        if abs(time.time() - ts) > 300:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Request timestamp expired (max 5 min skew)",
+            )
 
     result = await db.execute(select(AgentKey).where(AgentKey.key_id == key_id))
     agent_key = result.scalar_one_or_none()
@@ -392,36 +422,39 @@ async def delete_agent(
 
 async def record_uptime_probe(db: AsyncSession, target: str, is_up: bool):
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    result = await db.execute(
-        select(UptimeMetric).where(
-            UptimeMetric.target == target,
-            UptimeMetric.day == today,
-            UptimeMetric.user_key == None,
-        )
+    up_inc = 1 if is_up else 0
+    stmt = pg_insert(UptimeMetric).values(
+        target=target,
+        day=today,
+        up_probes=up_inc,
+        total_probes=1,
+        user_key=None,
+    ).on_conflict_do_update(
+        index_elements=["target", "day", "user_key"],
+        set_={
+            "total_probes": UptimeMetric.total_probes + 1,
+            "up_probes": UptimeMetric.up_probes + up_inc,
+        },
     )
-    metric = result.scalar_one_or_none()
-    if metric:
-        metric.total_probes += 1
-        if is_up:
-            metric.up_probes += 1
-    else:
-        metric = UptimeMetric(
-            target=target,
-            day=today,
-            up_probes=1 if is_up else 0,
-            total_probes=1,
-            user_key=None,
-        )
-        db.add(metric)
+    await db.execute(stmt)
     await db.commit()
 
 
 async def perform_rca(target: str, failed_agent_id: str) -> str:
     pattern = f"heartbeat:*:{target}"
-    keys = await redis_client.keys(pattern)
-    total = down = 0
+    # Use SCAN instead of KEYS to avoid blocking Redis
+    keys = []
+    async for key in redis_client.scan_iter(match=pattern, count=100):
+        keys.append(key)
+    if not keys:
+        return "Single agent monitoring this target. Global status unconfirmed."
+    # Pipeline all reads to reduce roundtrips
+    pipe = redis_client.pipeline()
     for key in keys:
-        raw = await redis_client.get(key)
+        pipe.get(key)
+    results = await pipe.execute()
+    total = down = 0
+    for raw in results:
         if raw:
             try:
                 data = json.loads(raw)
@@ -440,11 +473,6 @@ async def perform_rca(target: str, failed_agent_id: str) -> str:
     return f"Partial Outage: {down} of {total} agents see target as DOWN."
 
 
-async def _resolve_user_key_from_agent(agent_id: str, db: AsyncSession) -> str | None:
-    """No-op for single-user mode - always returns None."""
-    return None
-
-
 @app.post("/heartbeat")
 async def receive_heartbeat(
     heartbeat: Heartbeat,
@@ -461,6 +489,8 @@ async def receive_heartbeat(
         json.dumps(data),
     )
     await record_uptime_probe(db, heartbeat.target, is_up=True)
+    logger.info("heartbeat UP agent=%s target=%s latency=%sms",
+                heartbeat.agent_id, heartbeat.target, heartbeat.latency_ms)
     return {"status": "ok"}
 
 
@@ -500,6 +530,9 @@ async def receive_incident(
 
     await record_uptime_probe(db, incident.target, is_up=False)
 
+    logger.warning("incident DOWN agent=%s target=%s rca=%s",
+                   incident.agent_id, incident.target, rca_summary)
+
     background_tasks.add_task(
         dispatch_alerts,
         incident.agent_id,
@@ -520,13 +553,24 @@ async def get_status(
     db: AsyncSession = Depends(get_db),
 ):
     """Live status for all agents."""
-    keys = await redis_client.keys("heartbeat:*")
-    statuses = []
+    # Use SCAN instead of KEYS to avoid blocking Redis
+    keys = []
+    async for key in redis_client.scan_iter(match="heartbeat:*", count=100):
+        keys.append(key)
+    if not keys:
+        return {"statuses": []}
+    # Pipeline all reads to reduce roundtrips
+    pipe = redis_client.pipeline()
     for key in keys:
-        raw = await redis_client.get(key)
+        pipe.get(key)
+    results = await pipe.execute()
+    statuses = []
+    for raw in results:
         if raw:
-            data = json.loads(raw)
-            statuses.append(data)
+            try:
+                statuses.append(json.loads(raw))
+            except Exception:
+                pass
     return {"statuses": statuses}
 
 
@@ -580,7 +624,7 @@ async def get_uptime_metrics(
         )
         .where(
             UptimeMetric.day >= seven_days_ago,
-            UptimeMetric.user_key == None,
+            UptimeMetric.user_key.is_(None),
         )
         .group_by(UptimeMetric.target)
     )

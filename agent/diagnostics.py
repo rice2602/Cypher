@@ -8,12 +8,14 @@ network issues.
 Uses only Python stdlib (subprocess + socket + urllib) — no third-party libs.
 """
 
+import os
 import socket
 import subprocess
 import sys
 import time
 import urllib.request
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict
 
 
@@ -149,6 +151,8 @@ def run_dns_verification(host: str) -> str:
     Differentiates local DNS health from target domain DNS failure.
     Resolves the host locally and resolves global servers as control variables.
     """
+    control_host = os.getenv("DNS_CONTROL_HOST", "google.com")
+
     # 1. Resolve host
     target_resolved = False
     target_ips = []
@@ -162,7 +166,6 @@ def run_dns_verification(host: str) -> str:
     # 2. Resolve global control resolver to verify network DNS works
     control_resolved = False
     control_ips = []
-    control_host = "google.com"
     try:
         results = socket.getaddrinfo(control_host, None, proto=socket.IPPROTO_TCP)
         control_ips = sorted({r[4][0] for r in results})
@@ -194,7 +197,7 @@ def run_dns_verification(host: str) -> str:
 
 def collect(host: str, port: int, error: str = "TCP connection failed") -> Dict[str, str]:
     """
-    Collect all diagnostics for a failed target.
+    Collect all diagnostics for a failed target concurrently.
 
     Args:
         host:  The hostname (no port) extracted from the target string.
@@ -204,11 +207,22 @@ def collect(host: str, port: int, error: str = "TCP connection failed") -> Dict[
     Returns:
         {"ping": ..., "dns": ..., "error": ..., "traceroute": ..., "http": ..., "dns_verification": ...}
     """
-    return {
-        "ping": run_ping(host),
-        "dns": run_dns(host),
-        "error": error,
-        "traceroute": run_traceroute(host),
-        "http": run_http_diagnostic(host, port),
-        "dns_verification": run_dns_verification(host),
-    }
+    # Run diagnostics in parallel to reduce total collection time
+    results = {}
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futures = {
+            pool.submit(run_ping, host): "ping",
+            pool.submit(run_dns, host): "dns",
+            pool.submit(run_traceroute, host): "traceroute",
+            pool.submit(run_http_diagnostic, host, port): "http",
+            pool.submit(run_dns_verification, host): "dns_verification",
+        }
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                results[key] = future.result()
+            except Exception as exc:
+                results[key] = f"{key} error: {exc}"
+
+    results["error"] = error
+    return results

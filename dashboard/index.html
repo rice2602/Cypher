@@ -479,6 +479,9 @@
 const API = '';  // same-origin
 let currentPage = 'dashboard';
 let refreshTimer = null;
+// XSS-safe caches: store data in JS, reference by ID in onclick attributes
+let _destCache = [];
+let _agentCache = [];
 
 // ─── API helpers ───────────────────────────────────────────────────────────────
 async function api(method, path, body) {
@@ -511,6 +514,23 @@ function showApp() {
   document.getElementById('app').style.display = 'flex';
   navigate('dashboard');
   startAutoRefresh();
+  // Event delegation for data-action buttons (XSS-safe: no inline JSON)
+  document.addEventListener('click', function(ev) {
+    const btn = ev.target.closest('[data-action]');
+    if (!btn) return;
+    const action = btn.dataset.action;
+    if (action === 'edit-dest') {
+      const id = parseInt(btn.dataset.id);
+      const dest = _destCache.find(d => d.id === id);
+      if (dest) openDestModal(dest);
+    } else if (action === 'delete-dest') {
+      deleteDest(parseInt(btn.dataset.id), btn.dataset.name);
+    } else if (action === 'edit-agent') {
+      editAgent(parseInt(btn.dataset.idx));
+    } else if (action === 'delete-agent') {
+      deleteAgent(parseInt(btn.dataset.id), btn.dataset.name);
+    }
+  });
 }
 
 function navigate(page) {
@@ -670,6 +690,7 @@ async function loadDestTable() {
       wrap.innerHTML = `<div class="card">${emptyState('No destinations yet', 'Add your first destination to start monitoring.')}</div>`;
       return;
     }
+    _destCache = dests;
     wrap.innerHTML = `
       <div class="table-wrap">
         <table>
@@ -684,8 +705,8 @@ async function loadDestTable() {
               <td class="cell-muted">${d.tags || '—'}</td>
               <td>${d.is_active ? '<span class="badge badge-up">Active</span>' : '<span class="badge badge-unknown">Inactive</span>'}</td>
               <td style="white-space:nowrap">
-                <button class="btn btn-ghost btn-sm" onclick="openDestModal(${JSON.stringify(d).replace(/"/g,'&quot;')})">Edit</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteDest(${d.id}, '${e(d.name)}')">Delete</button>
+                <button class="btn btn-ghost btn-sm" data-action="edit-dest" data-id="${d.id}">Edit</button>
+                <button class="btn btn-danger btn-sm" data-action="delete-dest" data-id="${d.id}" data-name="${e(d.name)}">Delete</button>
               </td>
             </tr>`).join('')}
           </tbody>
@@ -733,9 +754,11 @@ function openDestModal(dest = null) {
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" id="dest-save-btn" onclick="saveDest(${isEdit ? dest.id : 'null'})">${isEdit ? 'Save changes' : 'Create'}</button>
+      <button class="btn btn-primary" id="dest-save-btn" data-id="${isEdit ? dest.id : ''}">${isEdit ? 'Save changes' : 'Create'}</button>
     </div>
   `);
+  // Attach save handler after modal is in DOM
+  document.getElementById('dest-save-btn').onclick = function() { saveDest(this.dataset.id ? parseInt(this.dataset.id) : null); };
 }
 
 async function saveDest(id) {
@@ -793,7 +816,9 @@ async function loadAgentTable() {
       api('GET', '/api/v1/destinations')
     ]);
     cachedDestinations = destsData || [];
+    _destCache = destsData || [];
     const agents = agentsData || [];
+    _agentCache = agents;
 
     if (agents.length === 0) {
       wrap.innerHTML = `<div class="card">${emptyState('No agents registered', 'Create at least one destination, then register an agent.')}</div>`;
@@ -809,7 +834,7 @@ async function loadAgentTable() {
         <table>
           <thead><tr><th>Name</th><th>Location</th><th>Destinations</th><th>Key ID</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
-            ${agents.map(a => `
+            ${agents.map((a, idx) => `
             <tr>
               <td><strong>${e(a.name)}</strong>${a.description ? `<div class="cell-muted">${e(a.description)}</div>` : ''}</td>
               <td class="cell-muted">${e(a.location || '—')}</td>
@@ -817,8 +842,8 @@ async function loadAgentTable() {
               <td>${a.key_id ? `<span class="cell-code">${e(a.key_id)}</span>` : '—'}</td>
               <td>${a.is_active ? '<span class="badge badge-up">Active</span>' : '<span class="badge badge-unknown">Inactive</span>'}</td>
               <td style="white-space:nowrap">
-                <button class="btn btn-ghost btn-sm" onclick="editAgent(${JSON.stringify(a).replace(/"/g,'&quot;')})">Edit</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteAgent(${a.id}, '${e(a.name)}')">Delete</button>
+                <button class="btn btn-ghost btn-sm" data-action="edit-agent" data-idx="${idx}">Edit</button>
+                <button class="btn btn-danger btn-sm" data-action="delete-agent" data-id="${a.id}" data-name="${e(a.name)}">Delete</button>
               </td>
             </tr>`).join('')}
           </tbody>
@@ -866,12 +891,15 @@ async function openAgentModal() {
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" id="agent-save-btn" onclick="saveAgent()">Register →</button>
+      <button class="btn btn-primary" id="agent-save-btn">Register →</button>
     </div>
   `);
+  document.getElementById('agent-save-btn').onclick = saveAgent;
 }
 
-function editAgent(agent) {
+function editAgent(idx) {
+  const agent = _agentCache[idx];
+  if (!agent) return;
   const dests = cachedDestinations;
   createModal('Edit Agent', `
     <div class="form-row">
@@ -892,9 +920,10 @@ function editAgent(agent) {
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" id="agent-save-btn" onclick="updateAgent(${agent.id})">Save changes</button>
+      <button class="btn btn-primary" id="agent-save-btn" data-agent-id="${agent.id}">Save changes</button>
     </div>
   `);
+  document.getElementById('agent-save-btn').onclick = function() { updateAgent(parseInt(this.dataset.agentId)); };
 }
 
 async function saveAgent() {

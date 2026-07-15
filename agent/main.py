@@ -5,6 +5,7 @@ Starts the probe loop: periodically checks each configured target and
 reports the result to the Cypher backend.
 """
 
+import signal
 import time
 import sys
 
@@ -13,10 +14,27 @@ from agent.diagnostics import collect
 from agent.probe import tcp_probe
 from agent.sender import send_heartbeat, send_incident
 
+_running = True
+
+
+def _shutdown(signum, frame):
+    """Handle SIGTERM/SIGINT for graceful shutdown."""
+    global _running
+    print(f"\n[agent] Received signal {signum}, shutting down...", flush=True)
+    _running = False
+
 
 def run() -> None:
     """Main probe loop — runs until interrupted."""
     targets = [t.strip() for t in config.TARGETS.split(",") if t.strip()]
+
+    if not targets:
+        print("[agent] No targets configured. Set TARGETS env var. Exiting.", flush=True)
+        sys.exit(1)
+
+    # Handle both SIGTERM (Docker stop) and SIGINT (Ctrl+C)
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT, _shutdown)
 
     print(f"Cypher Agent starting (id={config.AGENT_ID})", flush=True)
     print(f"Targets: {targets}", flush=True)
@@ -24,13 +42,18 @@ def run() -> None:
     print(f"Probe interval: {config.PROBE_INTERVAL}s", flush=True)
 
     try:
-        while True:
+        while _running:
             for target in targets:
+                if not _running:
+                    break
                 _probe_target(target)
-            time.sleep(config.PROBE_INTERVAL)
-    except KeyboardInterrupt:
-        print("\nAgent stopped.", flush=True)
-        sys.exit(0)
+            # Sleep in small increments so SIGTERM is responsive
+            for _ in range(config.PROBE_INTERVAL):
+                if not _running:
+                    break
+                time.sleep(1)
+    finally:
+        print("Agent stopped.", flush=True)
 
 
 def _probe_target(target: str) -> None:

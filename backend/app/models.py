@@ -11,7 +11,7 @@ import secrets
 from datetime import datetime, timezone
 from sqlalchemy import (
     String, Integer, Text, DateTime, ForeignKey, Boolean,
-    UniqueConstraint
+    UniqueConstraint, Index
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -124,6 +124,11 @@ class Incident(Base):
         DateTime(timezone=True), nullable=False, default=_now
     )
 
+    __table_args__ = (
+        Index("idx_incidents_target_created", "target", created_at.desc()),
+        Index("idx_incidents_agent_id", "agent_id"),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Uptime Metrics
@@ -142,4 +147,5 @@ class UptimeMetric(Base):
 
     __table_args__ = (
         UniqueConstraint("target", "day", "user_key", name="uq_target_day_user"),
+        Index("idx_uptime_metrics_target_day", "target", "day"),
     )

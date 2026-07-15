@@ -13,12 +13,16 @@ signed with HMAC-SHA256.
 import hashlib
 import hmac
 import json
+import logging
 import time
+import traceback
 import urllib.request
 import urllib.error
 from typing import Dict
 
 from agent.config import config
+
+logger = logging.getLogger("cypher.agent.sender")
 
 
 # ---------------------------------------------------------------------------
@@ -107,4 +111,4 @@ def _post(url: str, payload: dict) -> None:
         with urllib.request.urlopen(req, timeout=5) as resp:
             resp.read()
     except Exception as exc:
-        print(f"[sender] POST {url} failed: {exc}", flush=True)
+        logger.error("POST %s failed: %s\n%s", url, exc, traceback.format_exc())
