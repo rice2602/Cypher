@@ -1,13 +1,9 @@
 """
-auth.py — Password hashing + JWT (zero external dependency JWT, bcrypt for passwords).
+auth.py — Password hashing (bcrypt) + JWT (PyJWT).
 """
 
-import hmac
-import hashlib
-import base64
-import json
-import time
 import bcrypt
+import jwt
 from app.config import settings
 
 
@@ -29,17 +25,8 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# JWT (HS256, stdlib only — no PyJWT dependency)
+# JWT (HS256 via PyJWT)
 # ---------------------------------------------------------------------------
-
-def _b64url_encode(payload: bytes) -> str:
-    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("utf-8")
-
-
-def _b64url_decode(s: str) -> bytes:
-    padding = "=" * (4 - (len(s) % 4))
-    return base64.urlsafe_b64decode(s + padding)
-
 
 def create_jwt(
     payload: dict,
@@ -47,18 +34,13 @@ def create_jwt(
     expires_in: int = 86400   # 24 h default
 ) -> str:
     """Return a signed HS256 JWT."""
+    import time
     if secret is None:
         secret = settings.JWT_SECRET
-    header = {"alg": "HS256", "typ": "JWT"}
     payload_copy = payload.copy()
     if "exp" not in payload_copy:
         payload_copy["exp"] = int(time.time()) + expires_in
-
-    h = _b64url_encode(json.dumps(header).encode())
-    p = _b64url_encode(json.dumps(payload_copy).encode())
-    sig_data = f"{h}.{p}".encode()
-    sig = hmac.new(secret.encode(), sig_data, hashlib.sha256).digest()
-    return f"{h}.{p}.{_b64url_encode(sig)}"
+    return jwt.encode(payload_copy, secret, algorithm="HS256")
 
 
 def verify_jwt(token: str, secret: str = None) -> dict | None:
@@ -66,19 +48,6 @@ def verify_jwt(token: str, secret: str = None) -> dict | None:
     if secret is None:
         secret = settings.JWT_SECRET
     try:
-        parts = token.split(".")
-        if len(parts) != 3:
-            return None
-        h, p, sig = parts
-        sig_data = f"{h}.{p}".encode()
-        expected = _b64url_encode(
-            hmac.new(secret.encode(), sig_data, hashlib.sha256).digest()
-        )
-        if not hmac.compare_digest(sig, expected):
-            return None
-        payload = json.loads(_b64url_decode(p).decode())
-        if "exp" in payload and payload["exp"] < time.time():
-            return None
-        return payload
-    except Exception:
+        return jwt.decode(token, secret, algorithms=["HS256"])
+    except jwt.exceptions.PyJWTError:
         return None

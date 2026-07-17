@@ -1,16 +1,15 @@
 """
-models.py — Database models for Cypher v1 (single-user mode).
+models.py — Database models for Cypher.
 
 Destination: what to monitor.
-Agent: registered monitoring agent (requires >= 1 destination).
-Incident, UptimeMetric: existing monitoring data.
+Agent: registered monitoring agent (auto-assigned to all destinations by default).
+Incident, UptimeMetric: monitoring data.
 AgentKey: HMAC signing key per agent.
 """
 
-import secrets
 from datetime import datetime, timezone
 from sqlalchemy import (
-    String, Integer, Text, DateTime, ForeignKey, Boolean,
+    String, Integer, Text, DateTime, Boolean,
     UniqueConstraint, Index
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -32,19 +31,12 @@ class Destination(Base):
     __tablename__ = "destinations"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-
-    # Identity
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     url: Mapped[str] = mapped_column(String(500), nullable=False)
-
-    # Type: host | url | subnet | vmware | custom
     type: Mapped[str] = mapped_column(String(50), nullable=False, default="host")
-
-    # Optional details
     port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[str | None] = mapped_column(String(255), nullable=True)
-
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
@@ -64,13 +56,23 @@ class Agent(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    # JSON array of destination IDs this agent is assigned to monitor
+    # Backend-generated unique ID (e.g. "agent-a1b2c3d4")
+    agent_uid: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+
+    # JSON array of destination IDs. Empty = monitors all active destinations.
     destination_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
 
-    # Linked AgentKey.key_id — set after agent key is auto-generated on creation
+    # Linked AgentKey.key_id
     key_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # Agent-reported metadata (updated with each heartbeat)
+    metadata_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    metadata_hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    metadata_region: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    metadata_uptime: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )
@@ -86,10 +88,7 @@ class AgentKey(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     key_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     key_hash: Mapped[str] = mapped_column(String(128), nullable=False)
-
-    # The agent_id string used in heartbeats/incidents
-    agent_id: Mapped[str] = mapped_column(String(255), nullable=False)
-
+    agent_uid: Mapped[str] = mapped_column(String(64), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -105,7 +104,7 @@ class Incident(Base):
     __tablename__ = "incidents"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    agent_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    agent_uid: Mapped[str] = mapped_column(String(64), nullable=False)
     target: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="DOWN")
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -118,7 +117,9 @@ class Incident(Base):
     dns_verification_diagnostic: Mapped[str | None] = mapped_column(Text, nullable=True)
     root_cause_analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    user_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # Agent-reported metadata at time of incident
+    agent_hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    agent_region: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
@@ -126,7 +127,7 @@ class Incident(Base):
 
     __table_args__ = (
         Index("idx_incidents_target_created", "target", created_at.desc()),
-        Index("idx_incidents_agent_id", "agent_id"),
+        Index("idx_incidents_agent_uid", "agent_uid"),
     )
 
 
@@ -143,9 +144,7 @@ class UptimeMetric(Base):
     up_probes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_probes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
-    user_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-
     __table_args__ = (
-        UniqueConstraint("target", "day", "user_key", name="uq_target_day_user"),
+        UniqueConstraint("target", "day", name="uq_target_day"),
         Index("idx_uptime_metrics_target_day", "target", "day"),
     )

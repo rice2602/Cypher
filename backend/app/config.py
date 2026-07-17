@@ -8,14 +8,13 @@ class Settings:
         "postgresql+asyncpg://cypher:cypher@localhost:5432/cypher"
     )
 
-    # Redis (use Upstash REDIS_URL in production)
+    # Redis
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-    # JWT signing secret — set a strong random value in production
+    # JWT signing secret
     JWT_SECRET: str = os.getenv("JWT_SECRET", "cypher-change-this-in-production")
 
     # Single-user mode — when True all auth checks are bypassed.
-    # Default: True (local-first; no login required).
     SINGLE_USER_MODE: bool = os.getenv("SINGLE_USER_MODE", "true").lower() == "true"
 
     # Notifications (all optional)
@@ -29,8 +28,14 @@ class Settings:
     # Rate limiting
     RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "120"))
 
-    # CORS allowed origins (comma-separated). "*" allows all in dev.
+    # CORS
     CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "*")
+
+    # Heartbeat TTL multiplier: heartbeat keys expire after PROBE_INTERVAL * this
+    HEARTBEAT_TTL_MULTIPLIER: int = int(os.getenv("HEARTBEAT_TTL_MULTIPLIER", "3"))
+
+    # Default probe interval (used for staleness detection if agent doesn't report)
+    DEFAULT_PROBE_INTERVAL: int = int(os.getenv("DEFAULT_PROBE_INTERVAL", "30"))
 
 
 settings = Settings()

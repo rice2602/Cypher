@@ -8,7 +8,6 @@ network issues.
 Uses only Python stdlib (subprocess + socket + urllib) — no third-party libs.
 """
 
-import os
 import socket
 import subprocess
 import sys
@@ -148,51 +147,9 @@ def run_http_diagnostic(host: str, port: int) -> str:
 
 def run_dns_verification(host: str) -> str:
     """
-    Differentiates local DNS health from target domain DNS failure.
-    Resolves the host locally and resolves global servers as control variables.
+    Verify DNS resolution for host. Delegates to run_dns().
     """
-    control_host = os.getenv("DNS_CONTROL_HOST", "google.com")
-
-    # 1. Resolve host
-    target_resolved = False
-    target_ips = []
-    try:
-        results = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-        target_ips = sorted({r[4][0] for r in results})
-        target_resolved = True
-    except socket.gaierror:
-        pass
-
-    # 2. Resolve global control resolver to verify network DNS works
-    control_resolved = False
-    control_ips = []
-    try:
-        results = socket.getaddrinfo(control_host, None, proto=socket.IPPROTO_TCP)
-        control_ips = sorted({r[4][0] for r in results})
-        control_resolved = True
-    except socket.gaierror:
-        pass
-
-    if target_resolved:
-        return (
-            f"Target host '{host}' DNS resolution is healthy.\n"
-            f"Resolved IPs: {', '.join(target_ips)}"
-        )
-    else:
-        if control_resolved:
-            return (
-                f"DNS Query Verification: FAIL\n"
-                f"Detail: Local DNS resolver was able to resolve control host '{control_host}' -> {control_ips},\n"
-                f"but failed to resolve target host '{host}'.\n"
-                f"Conclusion: Target domain DNS registry is misconfigured or target is invalid/inactive."
-            )
-        else:
-            return (
-                f"DNS Query Verification: FAIL\n"
-                f"Detail: Local DNS resolver failed to resolve both target host '{host}'\n"
-                f"and control host '{control_host}'.\n"
-                f"Conclusion: Local DNS resolver is offline, or agent has lost local gateway/network internet access."
-            )
+    return run_dns(host)
 
 
 def collect(host: str, port: int, error: str = "TCP connection failed") -> Dict[str, str]:
