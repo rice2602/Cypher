@@ -2,8 +2,11 @@ import urllib.request
 import urllib.parse
 import json
 import asyncio
+import logging
 from datetime import datetime, timezone
 from app.config import settings
+
+logger = logging.getLogger("cypher.notifications")
 
 # ---------------------------------------------------------------------------
 # Sync network helpers (run in threadpools to be non-blocking)
@@ -20,8 +23,10 @@ def _post_json(url: str, payload: dict, description: str) -> None:
     try:
         with urllib.request.urlopen(req, timeout=5) as response:
             response.read()
-    except Exception as e:
-        print(f"[{description}] request failed: {e}", flush=True)
+    except Exception as exc:
+        # Notification URLs can contain credentials (for example, Telegram's
+        # bot token). Never log the exception text or request URL.
+        logger.warning("[%s] request failed (%s)", description, type(exc).__name__)
 
 
 def send_telegram_sync(token: str, chat_id: str, text: str) -> None:
